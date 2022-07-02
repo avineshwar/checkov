@@ -6,7 +6,7 @@ jobs:
   cfn-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: actions/setup-python@v2
         with:
           python-version: 3.7
@@ -20,7 +20,7 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v3
       - name: Set up Python 3.7
         uses: actions/setup-python@v2
         with:
@@ -40,7 +40,7 @@ jobs:
   integration-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - uses: actions/setup-python@v2
         with:
           python-version: 3.7
@@ -53,21 +53,21 @@ jobs:
           pipenv run pip install --upgrade pip==20.2
           pipenv run pip install dist/checkov-*
       - name: Clone Terragoat - vulnerable terraform
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
         with:
           repository: bridgecrewio/terragoat  # clone https://github.com/bridgecrewio/terragoat/
           token: ${{ secrets.GITHUB_TOKEN }}
           clean: false
           path: 'terragoat'
       - name: Clone Cfngoat - vulnerable cloudformation
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
         with:
           repository: bridgecrewio/cfngoat  # clone https://github.com/bridgecrewio/cfngoat/
           token: ${{ secrets.GITHUB_TOKEN }}
           clean: false
           path: 'cfngoat'
       - name: Clone Kubernetes-goat - vulnerable kubernetes
-        uses: actions/checkout@master
+        uses: actions/checkout@v3
         with:
           repository: madhuakula/kubernetes-goat  # clone https://github.com/madhuakula/kubernetes-goat
           token: ${{ secrets.GITHUB_TOKEN }}
