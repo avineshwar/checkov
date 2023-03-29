@@ -2,10 +2,12 @@ import logging
 import operator
 import os
 from functools import reduce
+
+from checkov.common.bridgecrew.platform_integration import bc_integration
 from checkov.common.util.type_forcers import force_list
 from checkov.common.output.record import Record
 from checkov.common.output.report import Report
-from checkov.common.runners.base_runner import BaseRunner, filter_ignored_directories
+from checkov.common.runners.base_runner import BaseRunner, filter_ignored_paths
 from checkov.kubernetes.parser.parser import parse
 from checkov.kubernetes.registry import registry
 from checkov.runner_filter import RunnerFilter
@@ -24,7 +26,7 @@ class Runner(BaseRunner):
         files_list = []
         if external_checks_dir:
             for directory in external_checks_dir:
-                registry.load_external_checks(directory, runner_filter)
+                registry.load_external_checks(directory)
 
         if files:
             for file in files:
@@ -34,7 +36,8 @@ class Runner(BaseRunner):
 
         if root_folder:
             for root, d_names, f_names in os.walk(root_folder):
-                filter_ignored_directories(d_names)
+                filter_ignored_paths(root, d_names, runner_filter.excluded_paths)
+                filter_ignored_paths(root, f_names, runner_filter.excluded_paths)
 
                 for file in f_names:
                     file_ending = os.path.splitext(file)[1]
@@ -46,9 +49,13 @@ class Runner(BaseRunner):
 
             for file in files_list:
                 relative_file_path = f'/{os.path.relpath(file, os.path.commonprefix((root_folder, file)))}'
-                parse_result = parse(file)
-                if parse_result:
-                    (definitions[relative_file_path], definitions_raw[relative_file_path]) = parse_result
+                try:
+                    parse_result = parse(file)
+                    if parse_result:
+                        (definitions[relative_file_path], definitions_raw[relative_file_path]) = parse_result
+                except (TypeError, ValueError) as e:
+                    logging.warning(f"Kubernetes skipping {file} as it is not a valid Kubernetes template\n{e}")
+                    continue
 
         for k8_file in definitions.keys():
 
@@ -70,25 +77,27 @@ class Runner(BaseRunner):
                     logging.debug("Template Dump for {}: {}".format(k8_file, definitions[k8_file][i], indent=2))
 
                     entity_conf = definitions[k8_file][i]
+                    if entity_conf is None:
+                        continue
 
                     # Split out resources if entity kind is List
-                    if entity_conf["kind"] == "List":
-                        for item in entity_conf["items"]:
+                    if isinstance(entity_conf, dict) and entity_conf["kind"] == "List":
+                        for item in entity_conf.get("items", []):
                             definitions[k8_file].append(item)
 
                 for i in range(len(definitions[k8_file])):
-                    if (not 'apiVersion' in definitions[k8_file][i].keys()) and (not 'kind' in definitions[k8_file][i].keys()):
+                    if _is_invalid_k8_definition(definitions[k8_file][i]):
                         continue
                     logging.debug("Template Dump for {}: {}".format(k8_file, definitions[k8_file][i], indent=2))
 
                     entity_conf = definitions[k8_file][i]
 
-                    if entity_conf["kind"] == "List":
+                    if isinstance(entity_conf, dict) and entity_conf.get("kind") == "List":
                         continue
 
                     # Skip entity without metadata["name"]
-                    if "metadata" in entity_conf:
-                        if isinstance(entity_conf["metadata"], int) or not "name" in entity_conf["metadata"]:
+                    if isinstance(entity_conf, dict) and entity_conf.get("metadata"):
+                        if isinstance(entity_conf["metadata"], int) or "name" not in entity_conf["metadata"]:
                             continue
                     else:
                         continue
@@ -128,20 +137,21 @@ class Runner(BaseRunner):
 
                 # Run for each definition included added container definitions
                 for i in range(len(definitions[k8_file])):
-                    if (not 'apiVersion' in definitions[k8_file][i].keys()) and (not 'kind' in definitions[k8_file][i].keys()):
+                    if _is_invalid_k8_definition(definitions[k8_file][i]):
                         continue
                     logging.debug("Template Dump for {}: {}".format(k8_file, definitions[k8_file][i], indent=2))
 
                     entity_conf = definitions[k8_file][i]
-
-                    if entity_conf["kind"] == "List":
+                    if entity_conf is None:
+                        continue
+                    if isinstance(entity_conf, dict) and (entity_conf["kind"] == "List" or not entity_conf.get("kind")):
                         continue
 
-                    if isinstance(entity_conf["kind"], int):
+                    if isinstance(entity_conf, dict) and isinstance(entity_conf.get("kind"), int):
                         continue
                     # Skip entity without metadata["name"] or parent_metadata["name"]
                     if not any(x in entity_conf["kind"] for x in ["containers", "initContainers"]):
-                        if "metadata" in entity_conf:
+                        if entity_conf.get("metadata"):
                             if isinstance(entity_conf["metadata"], int) or not "name" in entity_conf["metadata"]:
                                 continue
                         else:
@@ -178,7 +188,7 @@ class Runner(BaseRunner):
                     variable_evaluations = {}
 
                     for check, check_result in results.items():
-                        record = Record(check_id=check.id, check_name=check.name, check_result=check_result,
+                        record = Record(check_id=check.id, bc_check_id=check.bc_id, check_name=check.name, check_result=check_result,
                                         code_block=entity_code_lines, file_path=k8_file,
                                         file_line_range=entity_lines_range,
                                         resource=check.get_resource_id(entity_conf), evaluations=variable_evaluations,
@@ -220,6 +230,8 @@ class Runner(BaseRunner):
 def get_skipped_checks(entity_conf):
     skipped = []
     metadata = {}
+    bc_id_mapping = bc_integration.get_id_mapping()
+    ckv_to_bc_id_mapping = bc_integration.get_ckv_to_bc_id_mapping()
     if not isinstance(entity_conf,dict):
         return skipped
     if entity_conf["kind"] == "containers" or entity_conf["kind"] == "initContainers":
@@ -237,12 +249,19 @@ def get_skipped_checks(entity_conf):
             for key in annotation:
                 skipped_item = {}
                 if "checkov.io/skip" in key or "bridgecrew.io/skip" in key:
-                    if "CKV_K8S" in annotation[key]:
+                    if "CKV_K8S" in annotation[key] or "BC_K8S" in annotation[key]:
                         if "=" in annotation[key]:
                             (skipped_item["id"], skipped_item["suppress_comment"]) = annotation[key].split("=")
                         else:
                             skipped_item["id"] = annotation[key]
                             skipped_item["suppress_comment"] = "No comment provided"
+
+                        # No matter which ID was used to skip, save the pair of IDs in the appropriate fields
+                        if bc_id_mapping and skipped_item["id"] in bc_id_mapping:
+                            skipped_item["bc_id"] = skipped_item["id"]
+                            skipped_item["id"] = bc_id_mapping[skipped_item["id"]]
+                        elif ckv_to_bc_id_mapping:
+                            skipped_item["bc_id"] = ckv_to_bc_id_mapping.get(skipped_item["id"])
                         skipped.append(skipped_item)
                     else:
                         logging.debug("Parse of Annotation Failed for {}: {}".format(metadata["annotations"][key], entity_conf, indent=2))
@@ -272,3 +291,6 @@ def find_lines(node, kv):
                 yield x
 
 
+def _is_invalid_k8_definition(definition: dict) -> bool:
+    return isinstance(definition, dict) and 'apiVersion' not in definition.keys() and 'kind' not in \
+           definition.keys()

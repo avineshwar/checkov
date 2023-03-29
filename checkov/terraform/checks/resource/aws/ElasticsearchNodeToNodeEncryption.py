@@ -1,5 +1,6 @@
 from checkov.common.models.enums import CheckResult, CheckCategories
 from checkov.terraform.checks.resource.base_resource_check import BaseResourceCheck
+from checkov.common.util.type_forcers import force_int
 
 
 class ElasticsearchNodeToNodeEncryption(BaseResourceCheck):
@@ -24,12 +25,23 @@ class ElasticsearchNodeToNodeEncryption(BaseResourceCheck):
                     return CheckResult.PASSED
                 self.evaluated_keys = ['cluster_config/[0]/instance_count']
                 instance_count = cluster_config["instance_count"]
-                if isinstance(instance_count, int):
+                if isinstance(instance_count, list):
+                    instance_count = instance_count[0]
+                    if not isinstance(instance_count, int):
+                        return CheckResult.UNKNOWN
+                if instance_count:
                     if instance_count > 1:
                         self.evaluated_keys.append('node_to_node_encryption/[0]/enabled')
                         if "node_to_node_encryption" in conf.keys() and "enabled" in conf["node_to_node_encryption"][0]:
-                            if conf["node_to_node_encryption"][0]["enabled"]:
+                            n2n_enc_enabled = conf["node_to_node_encryption"][0]["enabled"]
+                            if isinstance(n2n_enc_enabled, list):
+                                n2n_enc_enabled = conf["node_to_node_encryption"][0]["enabled"][0]
+                            if not isinstance(n2n_enc_enabled, bool):
+                                return CheckResult.UNKNOWN
+                            if n2n_enc_enabled:
                                 return CheckResult.PASSED
+                            else:
+                                return CheckResult.FAILED
                         return CheckResult.FAILED
                     return CheckResult.PASSED
                 return CheckResult.UNKNOWN

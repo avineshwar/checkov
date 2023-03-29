@@ -2,7 +2,7 @@ from checkov.common.models.enums import CheckResult, CheckCategories
 from checkov.terraform.checks.resource.base_resource_value_check import BaseResourceCheck
 import re
 
-PORT_RANGE = re.compile('\d+-\d+')
+PORT_RANGE = re.compile(r'\d+-\d+')
 
 
 class SQLServerNoPublicAccess(BaseResourceCheck):
@@ -15,7 +15,8 @@ class SQLServerNoPublicAccess(BaseResourceCheck):
         super().__init__(name=name, id=id, categories=categories, supported_resources=supported_resources)
 
     def scan_resource_conf(self, conf):
-        if 'start_ip_address' in conf and conf['start_ip_address'][0] in ['0.0.0.0', '0.0.0.0/0']: # nosec
+        if ('start_ip_address' in conf and conf['start_ip_address'][0] in ['0.0.0.0', '0.0.0.0/0'] and  # nosec
+                'end_ip_address' in conf and conf['end_ip_address'][0] == '255.255.255.255'):
             return CheckResult.FAILED
         return CheckResult.PASSED
 

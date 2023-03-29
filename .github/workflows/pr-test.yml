@@ -4,7 +4,7 @@ on: pull_request
 
 jobs:
   cfn-lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, public, linux, x64]
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
@@ -12,22 +12,27 @@ jobs:
           python-version: 3.7
       - name: Install cfn-lint
         run: |
-          pip install cfn-lint==0.41.0
+          pip install cfn-lint==0.51.0
       - name: Lint Cloudformation templates
         run: |
           cfn-lint tests/cloudformation/checks/resource/aws/**/* -i W
 
   unit-tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python: [3.7, 3.8, 3.9]
+    runs-on: [self-hosted, public, linux, x64]
     steps:
       - uses: actions/checkout@v1
-      - name: Set up Python 3.7
+      - name: Set up Python ${{ matrix.python }}
         uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: ${{ matrix.python }}
       - uses: dschep/install-pipenv-action@v1
       - name: Install dependencies
         run: |
+          pipenv --python ${{ matrix.python }}
           pipenv install --dev
       - name: Unit tests
         env:
@@ -38,53 +43,39 @@ jobs:
           pipenv run python -m coverage html
 
   integration-tests:
+    strategy:
+      fail-fast: true
+      matrix:
+        python: [3.7, 3.8, 3.9]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v2
       - uses: azure/setup-helm@v1
       - uses: dschep/install-pipenv-action@v1
       - name: Build & install checkov package
         run: |
+          pipenv --python ${{ matrix.python }}
+          pipenv run pip install --upgrade pip==21.1.1
           pipenv run pip install pytest
           pipenv run python setup.py sdist bdist_wheel
-          pipenv run pip install --upgrade pip==20.2
-          pipenv run pip install dist/checkov-*
+          pipenv run pip install dist/checkov-*.whl
       - name: Clone Terragoat - vulnerable terraform
-        uses: actions/checkout@master
-        with:
-          repository: bridgecrewio/terragoat  # clone https://github.com/bridgecrewio/terragoat/
-          token: ${{ secrets.GITHUB_TOKEN }}
-          clean: false
-          path: 'terragoat'
+        run: git clone https://github.com/bridgecrewio/terragoat
       - name: Clone Cfngoat - vulnerable cloudformation
-        uses: actions/checkout@master
-        with:
-          repository: bridgecrewio/cfngoat  # clone https://github.com/bridgecrewio/cfngoat/
-          token: ${{ secrets.GITHUB_TOKEN }}
-          clean: false
-          path: 'cfngoat'
+        run: git clone https://github.com/bridgecrewio/cfngoat
       - name: Clone Kubernetes-goat - vulnerable kubernetes
-        uses: actions/checkout@master
-        with:
-          repository: madhuakula/kubernetes-goat  # clone https://github.com/madhuakula/kubernetes-goat
-          token: ${{ secrets.GITHUB_TOKEN }}
-          clean: false
-          path: 'kubernetes-goat'
+        run: git clone https://github.com/madhuakula/kubernetes-goat
       - name: Create checkov reports
+        env:
+          LOG_LEVEL: INFO
+          BC_KEY: ${{ secrets.BC_API_KEY }}
         run: |
-          pipenv run checkov -s -d terragoat/terraform/ -o json > checkov_report_terragoat.json
-          pipenv run checkov -s -d cfngoat/ -o json > checkov_report_cfngoat.json
-          pipenv run checkov -s -d kubernetes-goat/ --framework kubernetes -o json > checkov_report_kubernetes-goat.json
-          pipenv run checkov -s -d kubernetes-goat/ --framework helm -o json > checkov_report_kubernetes-goat-helm.json          
-          pipenv run checkov -s  --skip-check CKV_AWS_33,CKV_AWS_41 -d terragoat/terraform/ -o json > checkov_report_terragoat_with_skip.json
-          pipenv run checkov -s -d cfngoat/ -o json --quiet > checkov_report_cfngoat_quiet.json
-
+          sleep $((RANDOM % 11))
+          ./integration_tests/prepare_data.sh 3.8  # Just making sure the API key tests don't run on PRs
       - name: Run integration tests
         run: |
-          pipenv run pytest integration_tests
-
-
-
+          pipenv run pytest integration_tests -k 'not api_key'

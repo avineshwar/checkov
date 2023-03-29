@@ -13,13 +13,10 @@ class GenericGitLoader(ModuleLoader):
 
     def _load_module(self) -> ModuleContent:
         try:
-            module_source = self.module_source.lstrip('git::')
-            if module_source.startswith('ssh:'):
-                return ModuleContent(dir=None, failed_url=self.module_source)
+            module_source = self.module_source.replace('git::', '')
             git_getter = GitGetter(module_source, create_clone_and_result_dirs=False)
             git_getter.temp_dir = self.dest_dir
-            git_getter.do_get()
-            return_dir = self.dest_dir
+            return_dir = git_getter.do_get()
             if self.inner_module:
                 return_dir = os.path.join(self.dest_dir, self.inner_module)
             return ModuleContent(dir=return_dir)

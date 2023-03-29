@@ -2,7 +2,7 @@ from checkov.terraform.checks.resource.base_resource_check import BaseResourceCh
 from checkov.common.models.enums import CheckResult, CheckCategories
 import re
 
-USER_MANAGED_SERVICE_ACCOUNT = re.compile ('.*@.*\.iam\.gserviceaccount\.com$')
+USER_MANAGED_SERVICE_ACCOUNT = re.compile (r'.*@.*\.iam\.gserviceaccount\.com$')
 ADMIN_ROLE = re.compile ('.*(.*Admin|.*admin|editor|owner)')
 
 
@@ -16,8 +16,8 @@ class GoogleProjectAdminServiceAccount(BaseResourceCheck):
 
     def scan_resource_conf(self, conf):
         if 'member' in conf.keys():
-            if re.match(USER_MANAGED_SERVICE_ACCOUNT, conf['member'][0]):
-                if re.match(ADMIN_ROLE, conf['role'][0]):
+            if re.match(USER_MANAGED_SERVICE_ACCOUNT, str(conf['member'][0])):
+                if re.match(ADMIN_ROLE, str(conf['role'][0])):
                     return CheckResult.FAILED
         return CheckResult.PASSED
 

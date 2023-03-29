@@ -14,14 +14,14 @@ class MinimizeCapabilities(BaseK8Check):
         super().__init__(name=name, id=id, categories=categories, supported_entities=supported_kind)
 
     def get_resource_id(self, conf):
-        return f'{conf["parent"]} - {conf["name"]}'
+        return f'{conf["parent"]} - {conf["name"]}' if conf.get('name') else conf["parent"]
 
     def scan_spec_conf(self, conf):
         if conf.get("securityContext"):
             if conf["securityContext"].get("capabilities"):
                 if conf["securityContext"]["capabilities"].get("drop"):
                     for d in conf["securityContext"]["capabilities"]["drop"]:
-                        if "ALL" in d:
+                        if any(cap in d for cap in ("ALL", "all")):
                             return CheckResult.PASSED
         return CheckResult.FAILED
 

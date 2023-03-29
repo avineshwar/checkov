@@ -10,7 +10,7 @@ import json
 
 from checkov.common.output.record import Record
 from checkov.common.output.report import Report
-from checkov.common.runners.base_runner import BaseRunner, filter_ignored_directories
+from checkov.common.runners.base_runner import BaseRunner, filter_ignored_paths
 from checkov.kubernetes.runner import Runner as k8_runner
 from checkov.helm.registry import registry
 from checkov.runner_filter import RunnerFilter
@@ -27,8 +27,10 @@ class Runner(BaseRunner):
     system_deps = True
 
     @staticmethod
-    def find_chart_directories(root_folder, files):
+    def find_chart_directories(root_folder, files, excluded_paths):
         chart_directories = []
+        if not excluded_paths:
+            excluded_paths = []
         if files:
             logging.info('Running with --file argument; checking for Helm Chart.yaml files')
             for file in files:
@@ -37,7 +39,8 @@ class Runner(BaseRunner):
 
         if root_folder:
             for root, d_names, f_names in os.walk(root_folder):
-                filter_ignored_directories(d_names)
+                filter_ignored_paths(root, d_names, excluded_paths)
+                filter_ignored_paths(root, f_names, excluded_paths)
                 if 'Chart.yaml' in f_names:
                     chart_directories.append(root)
 
@@ -53,7 +56,7 @@ class Runner(BaseRunner):
         else: 
             lines = output.split('\n')
             for line in lines:
-                if line is not "":
+                if line != "":
                     if not "NAME" in line:
                         chart_name, chart_version, chart_repo, chart_status = line.split("\t")
                         chart_dependencies.update({chart_name.rstrip():{'chart_name': chart_name.rstrip(), 'chart_version': chart_version.rstrip(), 'chart_repo': chart_repo.rstrip(), 'chart_status': chart_status.rstrip()}})
@@ -95,9 +98,9 @@ class Runner(BaseRunner):
         files_list = []
         if external_checks_dir:
             for directory in external_checks_dir:
-                registry.load_external_checks(directory, runner_filter)
+                registry.load_external_checks(directory)
 
-        chart_directories = self.find_chart_directories(root_folder, files)
+        chart_directories = self.find_chart_directories(root_folder, files, runner_filter.excluded_paths)
 
         report = Report(self.check_type)
     
